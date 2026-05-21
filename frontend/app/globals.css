@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #080a0f;
+  color: #f8fafc;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.card {
+  @apply rounded-lg border border-line bg-panel p-5 shadow-sm;
+}
+
+.input {
+  @apply w-full rounded-md border border-line bg-panelSoft px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-signal;
+}
+
+.button-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-md bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.button-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-md border border-line bg-panelSoft px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full border border-line px-2 py-1 text-xs font-semibold uppercase tracking-normal text-slate-300;
+}
+
