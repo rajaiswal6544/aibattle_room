@@ -1,28 +1,31 @@
 # AI Creative Battle Room
 
-A small full-stack creative battle room where a host creates a challenge, a participant joins by room code, submits a prompt, and watches a mock AI generation job move live through the room. The host then scores the submission as survived, eliminated, or winner.
+This is my full-stack implementation of **AI Creative Battle Room**. I built it as a small real-time creative contest where a host creates a challenge room, another player joins with a room code, submits a creative prompt, and then watches the AI generation job update live in the room.
 
-This is intentionally scoped to one polished battle round. The goal is a reviewable vertical slice with durable state, backend-enforced permissions, realtime updates, and visible failure states.
+I focused on making the main loop complete and reviewable instead of adding too many side features. The app supports one polished battle round, persistent room state, backend permission checks, WebSocket updates, async generation jobs, and host judging.
 
-## Stack
+## Tech Stack
 
-- Frontend: Next.js, TypeScript, Tailwind CSS, Zustand, native WebSocket
-- Backend: FastAPI, SQLAlchemy, SQLite, FastAPI WebSockets
-- AI: `MockAIProvider` by default with latency, useful generated text, and occasional failure
+- Frontend: Next.js, TypeScript, Tailwind CSS, Zustand
+- Backend: FastAPI, SQLAlchemy, SQLite
+- Realtime: FastAPI WebSockets
+- AI provider: Mock AI provider by default
 
-## Local Setup
+The mock AI provider simulates latency, returns useful generated text, and can occasionally fail so the failed-job state is visible during testing.
 
-Backend:
+## How To Run Locally
+
+Start the backend:
 
 ```bash
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Frontend:
+Start the frontend in another terminal:
 
 ```bash
 cd frontend
@@ -30,11 +33,23 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Then open:
 
-## Environment
+```text
+http://localhost:3000
+```
 
-Copy `.env.example` for local values. The important defaults are:
+The backend health check is available at:
+
+```text
+http://localhost:8000/health
+```
+
+## Environment Variables
+
+The example environment files are included in `.env.example` and `backend/.env.example`.
+
+Important values:
 
 - `DATABASE_URL=sqlite:///./backend/battle_room.db`
 - `AI_PROVIDER=mock`
@@ -43,33 +58,52 @@ Copy `.env.example` for local values. The important defaults are:
 - `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`
 - `NEXT_PUBLIC_WS_BASE_URL=ws://localhost:8000`
 
-For a smooth recorded demo, create `backend/.env` and set:
+For a smoother local recording or review run, I can set the mock failure rate to zero in `backend/.env`:
 
 ```env
 MOCK_AI_FAILURE_RATE=0
 MOCK_AI_MAX_ATTEMPTS=2
 ```
 
-Restart the backend after changing environment values.
+The backend should be restarted after changing env values.
 
-## Architecture Overview
+## What The App Does
 
-The backend is the source of truth. Mutations happen through HTTP routes and every important state transition is persisted before being broadcast over WebSocket.
+The main flow is:
 
-The frontend restores `user_id` from localStorage, fetches a room snapshot on page load, opens `/ws/rooms/{room_code}?user_id=...`, and refetches snapshots after server events. Zustand is used for client convenience, not as durable state.
+- A user creates or restores a local identity.
+- A host creates a room with a challenge prompt.
+- Another user joins with the room code or invite link.
+- The host starts the round.
+- A participant submits one creative prompt.
+- The backend creates a generation job and returns immediately.
+- The room updates live as the job moves through `queued`, `running`, `completed`, or `failed`.
+- The generated output appears inside the room.
+- The host scores the submission and marks it as `survived`, `eliminated`, or `winner`.
+- Refreshing the page keeps the room, participant, round, submission, job, generated output, and score state.
 
-## Entity Model
+## Architecture
 
-- `User`: persistent local identity
-- `Room`: room code, title, challenge, host, status
-- `Participant`: user membership, role, active/eliminated status
-- `Round`: one battle round with status
-- `Submission`: participant prompt, generated output, status, error
-- `GenerationJob`: queued/running/completed/failed/timed_out lifecycle
-- `Score`: host score, decision, comment
-- `RoomEvent`: persisted activity feed and websocket event history
+The backend is the source of truth. I used HTTP routes for mutations and WebSockets for live room updates. Important state changes are persisted first and then broadcast to connected clients.
 
-## API Routes
+On the frontend, the app restores the current user from localStorage, fetches the room snapshot from the backend, and then connects to the room WebSocket. Zustand is only used for local client state; durable state lives in SQLite.
+
+## Data Model
+
+The backend persists these entities:
+
+- `User`: local identity
+- `Room`: room title, code, challenge, host, and room status
+- `Participant`: user membership in a room with host/participant role
+- `Round`: the active battle round
+- `Submission`: participant prompt and generated output
+- `GenerationJob`: async AI job lifecycle
+- `Score`: host score, decision, and optional comment
+- `RoomEvent`: activity feed and realtime event history
+
+## API Overview
+
+Implemented routes:
 
 - `POST /api/identity`
 - `POST /api/rooms`
@@ -81,9 +115,9 @@ The frontend restores `user_id` from localStorage, fetches a room snapshot on pa
 - `POST /api/generation-jobs/{job_id}/retry`
 - `WS /ws/rooms/{room_code}?user_id=<user_id>`
 
-## Realtime Event Model
+## Realtime Events
 
-The server broadcasts:
+The server broadcasts room events such as:
 
 - `room.snapshot`
 - `participant.joined`
@@ -95,79 +129,65 @@ The server broadcasts:
 - `submission.scored`
 - `participant.eliminated`
 
-Room events are persisted so refresh keeps the activity feed visible.
-
-## Generation Job Lifecycle
-
-When a participant submits a prompt, the API validates permission, creates a submission, creates a queued generation job, broadcasts the event, and returns immediately. A background task updates the job to `running`, calls the mock provider, then persists either `completed` with generated output or `failed`/`timed_out` with an error message.
+These events are also stored as `RoomEvent` records so the activity feed survives refreshes.
 
 ## Permission Rules
 
-The backend enforces:
+I enforced the important rules on the backend:
 
-- Host can start rounds.
-- Host can score and eliminate submissions.
-- Host cannot submit as contestant.
+- Only the host can start a round.
+- Only the host can score or eliminate submissions.
+- The host cannot submit as a contestant.
 - Participants can submit only during an active round.
 - Participants cannot start rounds or score.
-- One submission per participant per round.
+- A participant can submit only once per round.
 
-The frontend hides or disables invalid controls, but backend service checks are the authority.
+The UI hides invalid controls, but the backend checks are still the actual authority.
 
-## Scoring Mechanism
+## Scoring
 
-The host gives a score from 1 to 10 and marks each submission as `survived`, `eliminated`, or `winner`.
+The judging system is intentionally simple. The host gives a score from 1 to 10 and chooses one decision:
 
-Leaderboard sorting:
+- `survived`
+- `eliminated`
+- `winner`
 
-1. Winner first
-2. Score descending
-3. Completed submissions before failed submissions
-4. Submission time
+The leaderboard sorts by winner first, then score, then completed submissions before failed submissions, and finally submission time.
 
-This is simple, backend-enforceable, and easy for reviewers to understand. The weakness is that judging is subjective and host-only. A production version should add rubric scoring, audience voting, and AI-assisted judging.
+I chose this because it is easy to understand, easy to test, and backend-enforceable. The tradeoff is that judging is subjective and host-only. In a production version, I would add rubric scoring, audience voting, or AI-assisted judging.
 
-## Persisted State
+## Persistence
 
-SQLite persists users, rooms, participants, rounds, submissions, generation jobs, scores, and room events. Refreshing the page should preserve the room, current round, submissions, generated output, job state, and score.
+SQLite stores users, rooms, participants, rounds, submissions, generation jobs, scores, and room events. Refreshing the room page should not lose the current battle state.
 
 ## Failure Handling
 
-- Invalid prompts return and display `Prompt must be at least 10 characters.`
-- Permission errors return and display a denied message.
-- Mock AI failures persist as failed jobs and keep the room usable.
-- Failed or timed-out jobs can be retried, and the worker uses simple retry/backoff before marking a job failed.
-- WebSocket disconnects keep the last snapshot visible and reconnect.
-- Duplicate submissions are rejected by backend validation.
+I included visible handling for:
+
+- Invalid prompts
+- Permission denied actions
+- Duplicate submissions
+- Failed mock AI generations
+- Retrying failed or timed-out jobs
+- WebSocket reconnecting state
+
+The mock provider can fail on purpose. Failed jobs do not break the room, and they can be retried from the UI.
 
 ## Known Limitations
 
-- The app intentionally supports one round.
-- Mock AI is the only implemented provider.
-- Authentication is local identity, not production auth.
-- WebSocket events trigger snapshot refetches for reliability, which is simple but chatty.
-- SQLite is chosen for reviewability, not production scale.
-- Hosted deployment, spectator reactions/voting, AI announcer commentary, hidden round modifiers, and real media generation are not included.
+This is not meant to be production-grade. Some things I intentionally kept out:
 
-## What I Would Improve
+- Only one round is supported.
+- Authentication is simple local identity, not real auth.
+- The AI provider is mock-only.
+- WebSocket events refetch snapshots for reliability, which is simple but a little chatty.
+- SQLite is used for reviewability, not production scale.
+- Spectator mode, reactions, voting, AI announcer, hidden modifiers, real media generation, and hosted deployment are not included.
 
-- Add real provider implementations behind the existing provider abstraction.
-- Add richer retry controls and cancellation.
-- Add multi-round tournament state.
-- Add stronger automated tests around permission edge cases.
-- Add a rubric and optional audience voting.
+## What I Would Improve With More Time
 
-## Demo Script
-
-1. Open the frontend as Host.
-2. Create identity, for example `Raj`.
-3. Create a room with the default cyberpunk perfume challenge.
-4. Copy the room code or invite link.
-5. Open a second browser/incognito as Participant.
-6. Create identity, for example `Aman`.
-7. Join with the room code.
-8. Host starts the round.
-9. Participant submits: `Make a neon luxury perfume campaign with Blade Runner visuals, influencer drops, and mysterious street billboards.`
-10. Watch the job move through queued/running and complete or fail.
-11. Host scores the submission and marks survived, eliminated, or winner.
-12. Refresh both tabs and confirm the room state persists.
+- Add a real AI provider behind the existing provider abstraction.
+- Add better retry controls and job cancellation.
+- Support multiple rounds and a full tournament flow.
+- Add more backend tests around permission edge cases.
+- Add audience voting or rubric-based scoring.
